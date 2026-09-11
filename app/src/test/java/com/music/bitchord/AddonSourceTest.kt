@@ -64,6 +64,7 @@ class AddonSourceTest {
     fun tearDown() {
         server.shutdown()
         DeviceCodecs.forced = null
+        AppSettings.preferDolbyAtmos.value = false
     }
 
     // ── URL handling ──────────────────────────────────────────────────────
@@ -306,6 +307,82 @@ class AddonSourceTest {
         AddonSource(config()).stream("t1", StreamRequest.Capped(maxKbps = 64))
 
         assertEquals("LOW", requestFor("/stream/t1").queryParameter("quality"))
+    }
+
+    /**
+     * The Tidal backend's quality ladder, trimmed: the Atmos tier travels as
+     * the bare value `MAX`, with the meaning only in its label. An exact
+     * value match can therefore never find it — the preference has to read
+     * the labels too.
+     */
+    private fun tidalManifest() = json(
+        """
+        {"id":"com.tidal","name":"Tidal","resources":["search","stream"],
+         "settings":[
+           {"key":"quality","type":"select","default":"MAX",
+            "options":[
+              {"value":"HIRES","label":"Max (Hi-Res 24-bit up to 192 kHz, no Atmos)"},
+              {"value":"MAX","label":"Max + Dolby Atmos (Hi-Res 24-bit up to 192 kHz)"},
+              {"value":"LOSSLESS","label":"Lossless 16-bit / 44.1 kHz FLAC"},
+              {"value":"HIGH","label":"High (AAC 320 kbps)"},
+              {"value":"LOW","label":"Low (AAC 96 kbps)"}
+            ]}
+         ]}
+        """.trimIndent(),
+    )
+
+    /**
+     * Without the preference, the literal `LOSSLESS` option wins by exact
+     * match — which is why an Atmos mix is never served by default even
+     * though the addon holds one.
+     */
+    @Test
+    fun `without the Atmos preference lossless maps to the literal lossless option`() = runBlocking {
+        route("/manifest.json", tidalManifest())
+        route("/stream/t1", json("""{"url":"https://cdn/a.flac"}"""))
+
+        AddonSource(config()).stream("t1", StreamRequest.Lossless)
+
+        assertEquals("LOSSLESS", requestFor("/stream/t1").queryParameter("quality"))
+    }
+
+    @Test
+    fun `preferring Atmos maps lossless to the addon's Atmos option`() = runBlocking {
+        AppSettings.preferDolbyAtmos.value = true
+        route("/manifest.json", tidalManifest())
+        route("/stream/t1", json("""{"url":"https://cdn/a.mp4","codec":"eac3_joc","quality":"Dolby Atmos"}"""))
+
+        val stream = AddonSource(config()).stream("t1", StreamRequest.Lossless)
+
+        assertEquals("MAX", requestFor("/stream/t1").queryParameter("quality"))
+        assertNotNull(stream)
+        assertTrue(stream!!.format.isDolbyAtmos)
+    }
+
+    /**
+     * The preference reorders the choice among declared options; it never
+     * invents one. An addon with no Atmos tier is asked exactly as before.
+     */
+    @Test
+    fun `preferring Atmos with no Atmos tier falls back to lossless`() = runBlocking {
+        AppSettings.preferDolbyAtmos.value = true
+        route(
+            "/manifest.json",
+            json(
+                """
+                {"id":"a","name":"A","resources":["search","stream"],
+                 "settings":[
+                   {"key":"quality","type":"select","default":"normal",
+                    "options":[{"value":"lossless"},{"value":"high"},{"value":"normal"}]}
+                 ]}
+                """.trimIndent(),
+            ),
+        )
+        route("/stream/t1", json("""{"url":"https://cdn/a.flac"}"""))
+
+        AddonSource(config()).stream("t1", StreamRequest.Lossless)
+
+        assertEquals("lossless", requestFor("/stream/t1").queryParameter("quality"))
     }
 
     /** An id is a path segment, not string concatenation, or it can rewrite the request. */

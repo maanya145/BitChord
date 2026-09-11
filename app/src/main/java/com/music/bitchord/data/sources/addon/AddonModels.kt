@@ -105,8 +105,20 @@ data class AddonSetting(
 @Serializable
 data class AddonSettingOption(
     @SerialName("value") val value: JsonElement? = null,
+    /**
+     * The human-readable text the addon's own setup page shows for this
+     * choice ("Max + Dolby Atmos", …). Never sent — but it is the only place
+     * some addons name what an option *is*: Tidal's Atmos tier travels as the
+     * bare value `MAX`, and without the label there is nothing to match an
+     * Atmos preference against. See
+     * [AddonClient.matchTier][com.music.bitchord.data.sources.addon.AddonClient].
+     */
+    @SerialName("label") val label: String = "",
 ) {
     val stringValue: String? get() = value?.asQueryValue()
+
+    /** Value and label together, for matching what an option means rather than its code. */
+    val matchText: String get() = "${stringValue.orEmpty()} $label"
 }
 
 // ── Search ───────────────────────────────────────────────────────────────

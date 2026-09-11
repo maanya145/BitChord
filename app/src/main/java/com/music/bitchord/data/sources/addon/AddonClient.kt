@@ -128,10 +128,10 @@ class AddonClient(rawBaseUrl: String) {
      * either: the spec fixes the path, the parameter name and the shape coming
      * back.
      */
-    suspend fun search(query: String, tier: String): Result<List<AddonTrack>> {
+    suspend fun search(query: String, tier: String, preferAtmos: Boolean = false): Result<List<AddonTrack>> {
         val trimmed = query.trim()
         if (trimmed.isEmpty()) return Result.success(emptyList())
-        val params = settingsFor(tier)
+        val params = settingsFor(tier, preferAtmos)
         return searches.get(
             // The parameters are in the key because they are in the request:
             // the same query at a different quality is a different question,
@@ -154,8 +154,8 @@ class AddonClient(rawBaseUrl: String) {
      * a `/` or a `?` would otherwise rewrite the request into a different
      * endpoint entirely.
      */
-    suspend fun stream(trackId: String, tier: String): Result<AddonStream> {
-        val params = settingsFor(tier)
+    suspend fun stream(trackId: String, tier: String, preferAtmos: Boolean = false): Result<AddonStream> {
+        val params = settingsFor(tier, preferAtmos)
         return streams.get(
             key = keyOf(trackId, params.toString()),
             describe = { "▶ addon stream(${redact(baseUrl)}) id=$trackId tier=$tier" },
@@ -191,7 +191,7 @@ class AddonClient(rawBaseUrl: String) {
      * endpoint is fine should still be searchable, one tier hint the poorer,
      * rather than failing outright on a document nothing here strictly needs.
      */
-    private suspend fun settingsFor(tier: String): Map<String, String> {
+    private suspend fun settingsFor(tier: String, preferAtmos: Boolean = false): Map<String, String> {
         val declared = manifest().getOrNull()?.settings.orEmpty()
         val params = LinkedHashMap<String, String>()
         declared.forEach { setting ->
@@ -201,31 +201,50 @@ class AddonClient(rawBaseUrl: String) {
         if (tier.isNotBlank()) {
             val options = declared.firstOrNull { it.key == QUALITY_KEY }
                 ?.options.orEmpty()
-                .mapNotNull { it.stringValue }
-            params[QUALITY_KEY] = matchTier(tier, options) ?: tier
+            params[QUALITY_KEY] = matchTier(tier, options, preferAtmos) ?: tier
         }
         return params
     }
 
     /**
-     * The option in [options] that best answers a request for [tier], or null
-     * when the addon enumerated nothing to choose from.
+     * The [quality][QUALITY_KEY] value in [options] that best answers a request
+     * for [tier], or null when the addon enumerated nothing to choose from.
      *
      * Matched on what an option *says* rather than on its position, so an addon
      * listing its tiers best-first and one listing them worst-first are both
      * read correctly. Failing a word match it falls to the first option listed,
      * which an addon that bothered to order them makes its recommended tier.
+     *
+     * With [preferAtmos] — the "Prefer Atmos mixes" setting, asked only at the
+     * lossless tier — an option naming an immersive mix wins outright. Both the
+     * value and the label are read, because addons name tiers in either place:
+     * the Tidal backend behind the reference addon travels as the bare value
+     * `MAX` with the meaning ("Max + Dolby Atmos") only in its label. An addon
+     * with no Atmos tier falls through to the ordinary match below, so the
+     * preference changes nothing where there is nothing immersive to prefer.
      */
-    private fun matchTier(tier: String, options: List<String>): String? {
-        if (options.isEmpty()) return null
-        options.firstOrNull { it.equals(tier, ignoreCase = true) }?.let { return it }
+    private fun matchTier(
+        tier: String,
+        options: List<AddonSettingOption>,
+        preferAtmos: Boolean = false,
+    ): String? {
+        val usable = options.mapNotNull { option ->
+            option.stringValue?.let { it to option.matchText }
+        }
+        if (usable.isEmpty()) return null
+        if (preferAtmos && tier.equals(TIER_LOSSLESS, ignoreCase = true)) {
+            usable.firstOrNull { (_, text) ->
+                ATMOS_WORDS.any { it in text.lowercase() }
+            }?.let { return it.first }
+        }
+        usable.firstOrNull { (value, _) -> value.equals(tier, ignoreCase = true) }?.let { return it.first }
         val wanted = when (tier.uppercase()) {
             TIER_LOSSLESS -> LOSSLESS_WORDS
             TIER_LOW -> LOW_WORDS
             else -> HIGH_WORDS
         }
-        return options.firstOrNull { option -> wanted.any { it in option.lowercase() } }
-            ?: options.first()
+        return usable.firstOrNull { (_, text) -> wanted.any { it in text.lowercase() } }?.first
+            ?: usable.first().first
     }
 
     // ── Transport ─────────────────────────────────────────────────────────
@@ -341,6 +360,9 @@ class AddonClient(rawBaseUrl: String) {
         private val LOSSLESS_WORDS = listOf("lossless", "flac", "hifi", "hi-res", "hires", "max", "best")
         private val HIGH_WORDS = listOf("high", "320", "normal", "standard")
         private val LOW_WORDS = listOf("low", "96", "128", "min")
+
+        /** Words naming an immersive mix in an option's value or label. */
+        private val ATMOS_WORDS = listOf("atmos", "dolby", "spatial", "immersive", "joc", "360")
 
         private const val MANIFEST_SUFFIX = "/manifest.json"
 
