@@ -149,6 +149,16 @@ data class AddonTrack(
     /** Not in the spec, but several addons send it and it says the same thing. */
     @SerialName("audioQuality") val audioQuality: String = "",
     /**
+     * Whether the addon flags this row as the immersive mix. The Tidal
+     * backend does, per row — and it matters, because the immersive copy of
+     * a track is routinely a *separate row* from the stereo one under a
+     * different id, with a near-identical title, artist, album and runtime.
+     * Without this flag those two rows are indistinguishable downstream (see
+     * [AddonSource][com.music.bitchord.data.sources.AddonSource], which
+     * orders by it), and which one plays is the backend's listing order.
+     */
+    @SerialName("isAtmos") val isAtmos: Boolean = false,
+    /**
      * A stream URL for the row itself. When present the spec says the host
      * skips the `/stream` call entirely, and so does this app — one round trip
      * saved on the path that has to finish before audio starts.

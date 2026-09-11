@@ -143,12 +143,24 @@ class AddonSource(
     override suspend fun search(query: String, limit: Int, waitForAll: Boolean): List<Song> =
         withContext(Dispatchers.IO) {
             if (query.isBlank()) return@withContext emptyList()
-            val tracks = client.search(query, AddonClient.TIER_LOSSLESS, AppSettings.preferDolbyAtmos.value)
+            val preferAtmos = AppSettings.preferDolbyAtmos.value
+            val tracks = client.search(query, AddonClient.TIER_LOSSLESS, preferAtmos)
                 .getOrElse { failure ->
-                TrackLog.w(TAG, "${config.displayName}: search failed — ${failure.message}")
-                return@withContext emptyList()
-            }
-            tracks.asSequence()
+                    TrackLog.w(TAG, "${config.displayName}: search failed — ${failure.message}")
+                    return@withContext emptyList()
+                }
+            // With "Prefer Atmos mixes" on, immersive rows sort ahead of
+            // stereo ones — stably, so the backend's order survives everywhere
+            // except the exact tie this exists to break. The tie is real: an
+            // addon's Atmos copy is typically a separate row under a different
+            // id whose title, artist, album and runtime all match the stereo
+            // row, so [TrackMatcher][com.music.bitchord.data.sources.TrackMatcher]
+            // scores them identically and its stable sort keeps whichever the
+            // backend listed first. Ordering here is what lets the preference
+            // reach that choice; identity scoring itself is untouched, and
+            // with the preference off the order is exactly as it arrived.
+            val ordered = if (preferAtmos) tracks.sortedByDescending { it.isAtmos } else tracks
+            ordered.asSequence()
                 .filter { it.id.isNotBlank() && it.title.isNotBlank() }
                 .take(limit)
                 .map { track ->

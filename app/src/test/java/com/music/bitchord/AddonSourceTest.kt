@@ -385,6 +385,52 @@ class AddonSourceTest {
         assertEquals("lossless", requestFor("/stream/t1").queryParameter("quality"))
     }
 
+    /**
+     * Two rows for the same recording — the stereo copy the backend lists
+     * first and the Atmos copy under another id. Nothing in the matcher can
+     * separate them: same title, artist, album and runtime, so its stable
+     * sort keeps the backend's order. The preference is what breaks the tie.
+     */
+    private fun stereoThenAtmosSearch() = json(
+        """
+        {"tracks":[
+          {"id":"s1","title":"WILDFLOWER","artist":"Billie Eilish","album":"HIT ME HARD AND SOFT",
+           "duration":261,"artworkURL":"https://cdn/a.jpg","isHiRes":true,"isAtmos":false},
+          {"id":"s2","title":"\u25d7\u25d6 WILDFLOWER","artist":"Billie Eilish","album":"HIT ME HARD AND SOFT",
+           "duration":262,"artworkURL":"https://cdn/a.jpg","isHiRes":true,"isAtmos":true}
+        ]}
+        """.trimIndent(),
+    )
+
+    @Test
+    fun `preferring Atmos surfaces the Atmos row ahead of the identical stereo row`() = runBlocking {
+        AppSettings.preferDolbyAtmos.value = true
+        route("/manifest.json", tidalManifest())
+        route("/search", stereoThenAtmosSearch())
+
+        val songs = AddonSource(config()).search("wildflower billie eilish", limit = 5)
+
+        assertEquals(2, songs.size)
+        assertTrue(
+            "expected the Atmos row first, got ${songs.map { it.videoId }}",
+            songs.first().videoId.endsWith("::s2"),
+        )
+    }
+
+    @Test
+    fun `without the preference search order is exactly as the addon sent it`() = runBlocking {
+        route("/manifest.json", tidalManifest())
+        route("/search", stereoThenAtmosSearch())
+
+        val songs = AddonSource(config()).search("wildflower billie eilish", limit = 5)
+
+        assertEquals(2, songs.size)
+        assertTrue(
+            "expected backend order kept, got ${songs.map { it.videoId }}",
+            songs.first().videoId.endsWith("::s1"),
+        )
+    }
+
     /** An id is a path segment, not string concatenation, or it can rewrite the request. */
     @Test
     fun `a track id containing a slash stays one path segment`() = runBlocking {
