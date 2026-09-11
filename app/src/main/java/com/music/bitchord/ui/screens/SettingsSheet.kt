@@ -175,6 +175,7 @@ fun SettingsScreen(
     val automixPerformance by AppSettings.automixPerformanceMode.collectAsStateWithLifecycle()
     val skipSilence by AppSettings.skipSilence.collectAsStateWithLifecycle()
     val dolbyAtmos by AppSettings.dolbyAtmos.collectAsStateWithLifecycle()
+    val preferAtmos by AppSettings.preferDolbyAtmos.collectAsStateWithLifecycle()
     // A property of the hardware, so it is read once rather than remembered
     // against a key that can never change — see [DeviceCodecs.playsDolbyAtmos],
     // which caches the codec-list walk for the life of the process.
@@ -403,6 +404,17 @@ fun SettingsScreen(
                     )
                 },
                 onClick = { AppSettings.setDolbyAtmos(!dolbyAtmos) },
+            )
+            // The fetch-side half of the row above: where that one allows an
+            // Atmos rendition to play, this one asks addons for it in the
+            // first place. Kept behind the same support gate plus the toggle
+            // itself — preferring a mix the player is set to refuse would
+            // fetch streams only to pass on them.
+            SettingsSubRow(
+                title = stringResource(R.string.prefer_atmos),
+                checked = preferAtmos && dolbyAtmosSupported && dolbyAtmos,
+                onCheckedChange = { if (dolbyAtmosSupported && dolbyAtmos) AppSettings.setPreferDolbyAtmos(it) },
+                badge = stringResource(R.string.in_use).takeIf { preferAtmos && dolbyAtmosSupported && dolbyAtmos },
             )
         }
 

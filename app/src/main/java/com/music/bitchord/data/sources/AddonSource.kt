@@ -143,7 +143,8 @@ class AddonSource(
     override suspend fun search(query: String, limit: Int, waitForAll: Boolean): List<Song> =
         withContext(Dispatchers.IO) {
             if (query.isBlank()) return@withContext emptyList()
-            val tracks = client.search(query, AddonClient.TIER_LOSSLESS).getOrElse { failure ->
+            val tracks = client.search(query, AddonClient.TIER_LOSSLESS, AppSettings.preferDolbyAtmos.value)
+                .getOrElse { failure ->
                 TrackLog.w(TAG, "${config.displayName}: search failed — ${failure.message}")
                 return@withContext emptyList()
             }
@@ -172,7 +173,7 @@ class AddonSource(
     override suspend fun stream(trackId: String, request: StreamRequest): SourceStream? =
         withContext(Dispatchers.IO) {
             val tier = request.tier
-            val result = client.stream(trackId, tier)
+            val result = client.stream(trackId, tier, AppSettings.preferDolbyAtmos.value)
             val answer = result.getOrNull()
 
             if (answer == null) {
