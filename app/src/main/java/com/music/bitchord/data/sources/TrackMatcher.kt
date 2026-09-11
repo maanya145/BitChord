@@ -410,6 +410,23 @@ object TrackMatcher {
             .filter { it.isNotEmpty() }
         if (words.isEmpty()) return
         if (words.joinToString("") in NEUTRAL_SEGMENTS) return
+        // An immersive-format label — "(Atmos Mix)", "[Dolby Atmos]",
+        // "(Spatial Audio)" — names the mastering, not a different take, so
+        // it is filed as packaging, never as a version. Without this the
+        // "mix" in "Atmos Mix" marks the immersive copy a different
+        // recording and the plain take can never match it, which is exactly
+        // backwards: same take, wider master. A genuine take hiding in the
+        // same brackets ("Atmos Remix") still vetoes, via the tight take
+        // list below rather than the broad version one.
+        if (words.any { it in IMMERSIVE_MARKERS }) {
+            val takes = words.filter { it in IMMERSIVE_TAKE_WORDS }
+            if (takes.isNotEmpty()) {
+                versions += takes
+                return
+            }
+            context += words.filter { it.length > 2 && it !in NOISE_WORDS }
+            return
+        }
         val marks = words.filter { it in VERSION_WORDS }
         if (marks.isNotEmpty()) {
             versions += marks
@@ -634,6 +651,27 @@ object TrackMatcher {
         "radioversion", "radioedit", "stereoversion", "monoversion",
         "studioversion", "fullversion", "standardversion", "explicitversion",
         "deluxeversion", "originaltrack",
+    )
+
+    /**
+     * Words naming an immersive *format* rather than a take — the "Atmos" in
+     * "(Atmos Mix)". Read in [classify].
+     */
+    private val IMMERSIVE_MARKERS = setOf(
+        "atmos", "dolby", "spatial", "immersive", "surround", "joc",
+    )
+
+    /**
+     * Take-markers that keep their veto inside an immersive label. Deliberately
+     * narrow: only words that unambiguously mean a different performance or
+     * reworking ("Atmos Remix", "Live in Atmos"). Format-ish words — mix,
+     * version, edition — are left out on purpose, since inside these brackets
+     * they describe the master ("Atmos Mix" is the mix *in* Atmos).
+     */
+    private val IMMERSIVE_TAKE_WORDS = setOf(
+        "remix", "remixes", "rmx", "live", "concert", "unplugged", "acoustic",
+        "instrumental", "karaoke", "cover", "demo", "session", "sessions",
+        "sped", "slowed", "nightcore", "lofi",
     )
 
     /** Packaging words, worth nothing as a tie-break because everything has them. */

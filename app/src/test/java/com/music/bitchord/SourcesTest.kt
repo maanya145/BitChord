@@ -419,6 +419,21 @@ class SourcesTest {
         assertTrue(matches(song("Clocks", "Coldplay"), "Clocks (Radio Edit)", "Coldplay"))
     }
 
+    /**
+     * An immersive-format label is packaging, not a take: the same recording
+     * in a wider master. The "mix" in "Atmos Mix" must not file it as a
+     * different version the way a plain "Mix" does.
+     */
+    @Test
+    fun `treats an Atmos label as the plain track, not a different take`() {
+        assertTrue(matches(song("Hotel California (Atmos Mix)", "Eagles"), "Hotel California", "Eagles"))
+        assertTrue(matches(song("Blinding Lights", "The Weeknd"), "◗◖ Blinding Lights", "The Weeknd"))
+        assertTrue(matches(song("bad guy [Dolby Atmos]", "Billie Eilish"), "bad guy", "Billie Eilish"))
+        // …while a genuine take in the same brackets still vetoes.
+        assertFalse(matches(song("Shape of You (Atmos Remix)", "Ed Sheeran"), "Shape of You", "Ed Sheeran"))
+        assertFalse(matches(song("Creep (Live in Atmos)", "Radiohead"), "Creep", "Radiohead"))
+    }
+
     /** The signal a title can't give: a loop, a snippet, or a whole album side. */
     @Test
     fun `refuses a candidate whose runtime is nowhere near`() {
