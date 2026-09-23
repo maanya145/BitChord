@@ -69,12 +69,20 @@ val listenTogetherServer: String = (
  */
 val betaSuffix = "beta2"
 
+/**
+ * `-PappIdSuffix=.v3` installs the build as a separate app (package + name) beside the official BitChord, whose
+ * signature a self-built APK can never match. Unset, the IDs are the shipped ones.
+ */
+val appIdSuffix = (project.findProperty("appIdSuffix") as String?)?.trim()?.takeIf { it.isNotEmpty() }
+val appLabelSuffix = appIdSuffix?.let { " " + it.trimStart('.') }.orEmpty()
+
 android {
     namespace = "com.music.bitchord"
     compileSdk = 36
 
     defaultConfig {
         applicationId = "com.music.bitchord"
+        if (appIdSuffix != null) applicationIdSuffix = appIdSuffix
         // 26 keeps reach wide; real-time blur (RenderEffect) kicks in on API 31+,
         // Haze falls back to a translucent scrim below that.
         minSdk = 26
@@ -94,12 +102,16 @@ android {
         )
     }
 
+    // `-Pabis=arm64-v8a` (comma-separated) narrows the build to those ABIs and drops the universal APK — CI uses it
+    // so its artifact is the one APK a modern phone needs rather than every split plus a fat universal build.
+    val abiList = (project.findProperty("abis") as String?)
+        ?.split(',')?.map(String::trim)?.filter(String::isNotEmpty)
     splits {
         abi {
             isEnable = true
             reset()
-            include("armeabi-v7a", "arm64-v8a", "x86_64")
-            isUniversalApk = true
+            if (abiList != null) include(*abiList.toTypedArray()) else include("armeabi-v7a", "arm64-v8a", "x86_64")
+            isUniversalApk = abiList == null
         }
     }
 
@@ -118,11 +130,12 @@ android {
         create("dev") {
             dimension = "env"
             applicationId = "com.dev.bitchord"
-            resValue("string", "app_name", "BitChord Dev")
+            resValue("string", "app_name", "BitChord$appLabelSuffix Dev")
         }
         create("prod") {
             dimension = "env"
             // Matches defaultConfig — this is the package already shipped/installed.
+            if (appIdSuffix != null) resValue("string", "app_name", "BitChord$appLabelSuffix")
         }
     }
 
