@@ -94,12 +94,16 @@ android {
         )
     }
 
+    // `-Pabis=arm64-v8a` (comma-separated) narrows the build to those ABIs and drops the universal APK — CI uses it
+    // so its artifact is the one APK a modern phone needs rather than every split plus a fat universal build.
+    val abiList = (project.findProperty("abis") as String?)
+        ?.split(',')?.map(String::trim)?.filter(String::isNotEmpty)
     splits {
         abi {
             isEnable = true
             reset()
-            include("armeabi-v7a", "arm64-v8a", "x86_64")
-            isUniversalApk = true
+            if (abiList != null) include(*abiList.toTypedArray()) else include("armeabi-v7a", "arm64-v8a", "x86_64")
+            isUniversalApk = abiList == null
         }
     }
 

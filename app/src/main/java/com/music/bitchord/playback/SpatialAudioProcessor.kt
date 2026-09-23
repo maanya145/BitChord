@@ -7,11 +7,28 @@ import androidx.media3.common.util.UnstableApi
 import com.music.bitchord.playback.audio.AudioBlock
 import com.music.bitchord.playback.audio.FloatAudioProcessor
 import com.music.bitchord.playback.audio.PcmBoundary
+import com.music.bitchord.playback.binaural.BinauralIrStore
+import com.music.bitchord.playback.binaural.BinauralRenderer
 import java.nio.ByteOrder
 import kotlin.math.roundToInt
 
+/** How [SpatialAudioProcessor] spatializes a stereo track. */
+enum class SpatialMode {
+    /** Mid/side widening plus a short cross-feed: cheap, speaker-friendly, not true binaural. */
+    WIDEN,
+
+    /**
+     * Headphone binaural rendering ([BinauralRenderer]): upmix to 5.1, then place the six channels as virtual
+     * speakers in a room around the listener with measured head-related impulse responses.
+     */
+    BINAURAL,
+}
+
 /**
- * Cheap stand-in for "spatial audio": widens the mid/side image and mixes in
+ * Spatial audio for stereo tracks, in one of two [SpatialMode]s.
+ *
+ * [SpatialMode.BINAURAL] hands the float path to [BinauralRenderer]. [SpatialMode.WIDEN] is the
+ * cheap stand-in this class started as: widens the mid/side image and mixes in
  * a short, low-passed cross-feed between channels — the same trick most
  * consumer virtual-surround plugins use. O(1) per sample, no FFT or
  * convolution, so it costs nothing worth measuring on a phone CPU.
@@ -26,6 +43,20 @@ class SpatialAudioProcessor : BaseAudioProcessor() {
 
     @Volatile
     var enabled: Boolean = false
+
+    /** Which spatializer runs while [enabled]. Read on the audio thread at every block. */
+    @Volatile
+    var mode: SpatialMode = SpatialMode.BINAURAL
+
+    /**
+     * The binaural renderer for the current rate, built on first use. Null while the rate has no responses
+     * (outside [BinauralIrStore.MIN_RATE]..[BinauralIrStore.MAX_RATE], or before the store is initialised), in
+     * which case binaural mode falls back to widening rather than going silent.
+     */
+    private var binaural: BinauralRenderer? = null
+
+    /** Whether the previous block went through [binaural]; a fresh start resets it so no stale audio replays. */
+    private var binauralRunning = false
 
     /** How much wider the stereo image gets. 1.0 = untouched. */
     private val widthGain = 2.5f
@@ -52,6 +83,9 @@ class SpatialAudioProcessor : BaseAudioProcessor() {
      * Configures the Float32 DSP engine for [sampleRate] and [channelCount].
      */
     fun configure(sampleRate: Int, channelCount: Int) {
+        // A new stream in the same format (the next track of a gapless run) keeps the binaural renderer going:
+        // resetting it would cut the previous track's tail and open a ~50 ms hole. Seeks still reset it (flush).
+        val keepBinaural = binauralRunning && sampleRate == this.sampleRate && channelCount == this.channelCount
         this.sampleRate = sampleRate
         this.channelCount = channelCount
         if (channelCount != 2 || sampleRate <= 0) {
@@ -70,6 +104,7 @@ class SpatialAudioProcessor : BaseAudioProcessor() {
             delayRight = FloatArray(delaySamples)
         }
         onFlush()
+        binauralRunning = keepBinaural
     }
 
     /**
@@ -77,8 +112,24 @@ class SpatialAudioProcessor : BaseAudioProcessor() {
      * Preserves dynamic headroom without clamping to [-1.0f, +1.0f].
      */
     fun process(block: AudioBlock) {
-        if (!enabled || block.frameCount == 0) return
+        if (!enabled || block.frameCount == 0) {
+            if (!enabled) binauralRunning = false
+            return
+        }
         if (block.channelCount != 2) return // Spatial widening only applies to stereo
+
+        if (mode == SpatialMode.BINAURAL) {
+            val renderer = binauralRenderer()
+            if (renderer != null) {
+                if (!binauralRunning) {
+                    renderer.reset()
+                    binauralRunning = true
+                }
+                renderer.process(block.samples, block.frameCount)
+                return
+            }
+        }
+        binauralRunning = false
 
         val delaySize = delayLeft.size
         if (delaySize == 0) return
@@ -121,6 +172,25 @@ class SpatialAudioProcessor : BaseAudioProcessor() {
     }
 
     /**
+     * Frames of output still owed after the last input frame: the binaural renderer's latency plus its room tail.
+     * The precision sink feeds this much silence through the chain at end of stream so the end of a track is not
+     * cut off. Zero when binaural rendering is not running.
+     */
+    fun tailFrames(): Int =
+        if (enabled && binauralRunning) binaural?.tailFrames ?: 0 else 0
+
+    private fun binauralRenderer(): BinauralRenderer? {
+        val current = binaural
+        if (current != null && current.sampleRate == sampleRate) return current
+        if (channelCount != 2 || sampleRate <= 0) return null
+        val irs = BinauralIrStore.forRate(sampleRate) ?: return null
+        return BinauralRenderer(sampleRate, irs).also {
+            binaural = it
+            binauralRunning = false
+        }
+    }
+
+    /**
      * Stereo 16-bit only: the widening is written in terms of a left and a
      * right sample, and there is no mid/side of a mono voice note or of a 5.1
      * mix to widen.
@@ -149,6 +219,7 @@ class SpatialAudioProcessor : BaseAudioProcessor() {
     }
 
     override fun onFlush() {
+        binauralRunning = false
         delayLeft.fill(0f)
         delayRight.fill(0f)
         delayIndex = 0
@@ -157,6 +228,8 @@ class SpatialAudioProcessor : BaseAudioProcessor() {
     }
 
     override fun onReset() {
+        binaural = null
+        binauralRunning = false
         delayLeft = FloatArray(0)
         delayRight = FloatArray(0)
         delayIndex = 0

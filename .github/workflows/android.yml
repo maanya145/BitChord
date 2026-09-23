@@ -26,14 +26,22 @@ jobs:
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
+    - name: Binaural spatializer tests
+      run: >-
+        ./gradlew testDevDebugUnitTest
+        --tests 'com.music.bitchord.playback.binaural.*'
+        --tests 'com.music.bitchord.playback.audio.PrecisionAudioSinkTest'
+
+    # arm64-v8a only (Galaxy S21 and every other 64-bit ARM phone): one APK to download instead of every split
     - name: Build Dev Debug APK
-      run: ./gradlew assembleDevDebug
+      run: ./gradlew assembleDevDebug -Pabis=arm64-v8a
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: bitchord-dev-debug
-        path: app/build/outputs/apk/dev/debug/*.apk
+        name: bitchord-dev-debug-arm64-v8a
+        path: app/build/outputs/apk/dev/debug/*arm64-v8a*.apk
+        if-no-files-found: error
 
   build-prod-release:
     if: github.ref == 'refs/heads/main'
@@ -65,10 +73,11 @@ jobs:
       run: chmod +x gradlew
 
     - name: Build Signed Prod Release APK
-      run: ./gradlew assembleProdRelease
+      run: ./gradlew assembleProdRelease -Pabis=arm64-v8a
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: bitchord-prod-release-signed
-        path: app/build/outputs/apk/prod/release/*.apk
+        name: bitchord-prod-release-signed-arm64-v8a
+        path: app/build/outputs/apk/prod/release/*arm64-v8a*.apk
+        if-no-files-found: error
