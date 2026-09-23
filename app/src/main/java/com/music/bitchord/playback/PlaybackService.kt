@@ -1085,6 +1085,8 @@ class PlaybackService : MediaLibraryService() {
 
     override fun onCreate() {
         super.onCreate()
+        // Stereo Spatialization's speaker responses live in assets; the audio thread loads them on first use.
+        com.music.bitchord.playback.spatializer.SpeakerResponseStore.init(this)
 
         if (com.music.bitchord.data.innertube.Innertube.cookie == null) {
             com.music.bitchord.data.innertube.Innertube.cookie = com.music.bitchord.auth.AuthStore(this).cookie
@@ -4969,6 +4971,9 @@ class PlaybackService : MediaLibraryService() {
             AppSettings.spatialAudio.collect { applySpatialAudioEnabled() }
         }
         scope.launch {
+            AppSettings.spatialAudioMode.collect { applySpatialAudioEnabled() }
+        }
+        scope.launch {
             AppSettings.loudnessNormalization.collect {
                 setupLoudnessEnhancer(player?.currentMediaItem?.mediaId)
             }
@@ -5029,6 +5034,9 @@ class PlaybackService : MediaLibraryService() {
      */
     private fun applySpatialAudioEnabled() {
         val enabled = AppSettings.spatialAudio.value && !activeTrackIsDolbyAtmos
+        val mode = AppSettings.spatialAudioMode.value
+        spatialAudioProcessorA.mode = mode
+        spatialAudioProcessorB.mode = mode
         spatialAudioProcessorA.enabled = enabled
         spatialAudioProcessorB.enabled = enabled
     }
