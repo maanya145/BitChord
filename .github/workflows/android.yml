@@ -26,15 +26,24 @@ jobs:
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
+    # One debug key for every run: without it each runner signs with a fresh random key and a newer build
+    # cannot be installed over an older one.
+    - name: Reuse debug keystore
+      uses: actions/cache@v4
+      with:
+        path: ~/.android/debug.keystore
+        key: android-debug-keystore-v1
+
     - name: Binaural spatializer tests
       run: >-
         ./gradlew testDevDebugUnitTest
         --tests 'com.music.bitchord.playback.binaural.*'
         --tests 'com.music.bitchord.playback.audio.PrecisionAudioSinkTest'
 
-    # arm64-v8a only (Galaxy S21 and every other 64-bit ARM phone): one APK to download instead of every split
+    # arm64-v8a only (Galaxy S21 and every other 64-bit ARM phone): one APK to download instead of every split.
+    # appIdSuffix: installs beside the official BitChord (different package + name) instead of clashing with it.
     - name: Build Dev Debug APK
-      run: ./gradlew assembleDevDebug -Pabis=arm64-v8a
+      run: ./gradlew assembleDevDebug -Pabis=arm64-v8a -PappIdSuffix=.v3
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
@@ -73,7 +82,7 @@ jobs:
       run: chmod +x gradlew
 
     - name: Build Signed Prod Release APK
-      run: ./gradlew assembleProdRelease -Pabis=arm64-v8a
+      run: ./gradlew assembleProdRelease -Pabis=arm64-v8a -PappIdSuffix=.v3
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
